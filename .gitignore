@@ -1,0 +1,24 @@
+# Compilación
+build/
+prueba/*.exe
+*.o
+__pycache__/
+
+# Entorno de Python
+herramientas/.venv/
+
+# Referencias de la comunidad (se descargan aparte; licencias propias)
+referencias/
+
+# Datos derivados de la tabla de The Grand Archives y claves de los archivos del juego
+herramientas/claves_bhd_ds3.json
+herramientas/regiones_tga.txt
+herramientas/tga_world_flags.txt
+
+# Datos personales de partidas y respaldos
+capturas/retratos-viejos/
+capturas/respaldo-partidas/
+
+# El paquete se publica como release, no en el repositorio
+paquete/
+release/
