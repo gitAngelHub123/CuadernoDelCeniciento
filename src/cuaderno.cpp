@@ -58,6 +58,7 @@ std::set<long long> novedadesVistas, clavesAhora;   // claves ya vistas por el j
 bool novedadesBase = false;      // la primera lectura de la partida ya se dio por vista (sin aviso)
 bool hayNovedad = false, inventarioLeido = false;
 ULONGLONG novedadesDesde = 0;    // cuándo se cargó la partida
+std::string demoFotos;           // demo: carpeta con npcNN.bmp para las capturas de la página de Personas
 int demoNovedad = -1;            // demo: cuadro en que "aparece" algo nuevo
 
 // foto pendiente
@@ -168,6 +169,7 @@ void cargarConfig() {
         else if (k == "demo") demo = atoi(v) != 0;
         else if (k == "demo_vista") demoVista = atoi(v);
         else if (k == "demo_paso") demoPaso = atoi(v);       // cuadro en que se "pulsa" J
+        else if (k == "demo_fotos") demoFotos = v;
         else if (k == "demo_novedad") demoNovedad = atoi(v);   // cuadro en que aparece algo nuevo (prueba del aviso)
         else if (k == "demo_captura") demoCaptura = atoi(v); // cuadro de la captura
         else if (k == "demo_accion") demoAccion = atoi(v);   // 0 cuaderno, 1 siguiente, 2 anterior
@@ -1633,7 +1635,14 @@ void iniciar(ID3D11Device* d, ID3D11DeviceContext* c, HWND h, const char* carpet
         for (uint32_t id : {0x40000000u | 2137, 0x40000000u | 2102, 0x40000000u | 2010, 0x40000000u | 2118, 0x40000000u | 2108, 0x40000000u | 2127, 0x40000000u | 2132})
             objetosVistos.insert(id);
         objetosAhora = {0x40000000u | 2137, 0x40000000u | 2102, 0x40000000u | 2127, 0x40000000u | 2132, 0x40000000u | 2108};
-        fotoPendienteNpc = N_SIRRIS; fotoCuando = GetTickCount64() + 300;   // prueba del filtro sepia
+        if (demoFotos.empty()) { fotoPendienteNpc = N_SIRRIS; fotoCuando = GetTickCount64() + 300; }   // prueba del filtro sepia
+        else {   // capturas con retratos reales ya tomados: solo los NPCs que tienen foto
+            npcsConocidos.clear();
+            for (int i = 0; i < N_TOTAL; ++i) {
+                std::string r = demoFotos + "\\npc" + (i < 10 ? "0" : "") + std::to_string(i) + ".bmp";
+                if (auto* t = cargarBmp(std::wstring(r.begin(), r.end()))) { fotos[i] = t; npcsConocidos.insert(i); }
+            }
+        }
         novedadesDesde = GetTickCount64();
         sonar(true);
         vista = demoVista;
