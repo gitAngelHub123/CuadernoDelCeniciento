@@ -12,7 +12,7 @@ for f in buffer hook trampoline hde/hde64; do
   x86_64-w64-mingw32-gcc -O2 -c $M/src/$f.c -I$M/include -o build/obj/$(basename $f).o
 done
 x86_64-w64-mingw32-g++ -std=c++17 -O2 -shared -o build/dinput8.dll \
-  src/main.cpp src/juego.cpp src/cuaderno.cpp src/sonido.cpp \
+  src/main.cpp src/juego.cpp src/cuaderno.cpp src/sonido.cpp src/idioma.cpp \
   $I/imgui.cpp $I/imgui_draw.cpp $I/imgui_tables.cpp $I/imgui_widgets.cpp \
   $I/backends/imgui_impl_win32.cpp $I/backends/imgui_impl_dx11.cpp \
   build/obj/*.o \

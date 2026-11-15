@@ -1,4 +1,6 @@
-# Cuaderno del Ceniciento
+# Cuaderno del Ceniciento · The Ashen One's Journal
+
+**English:** a travel journal for DARK SOULS III (1.15.2) that guides you without removing exploration. Press a key and an old-paper book opens with everything you have discovered. **Now available in English and Spanish**: it follows the language Steam launches the game in (`idioma=auto` in `config.ini`; set `idioma=en` or `idioma=es` to force one). Play offline only. Install: copy `dinput8.dll` into `...\DARK SOULS III\Game\` (Linux/Proton: launch option `WINEDLLOVERRIDES="dinput8=n,b" %command%`). Keys: K open/close, L next page, J previous page, P redo portrait; gamepad: L3+R3 open/close, R3 next, L3 previous.
 
 Mod para **DARK SOULS III** (versión 1.15.2): un cuaderno de viaje de papel antiguo que te orienta sin quitarte la exploración. Pulsa una tecla y se abre un libro con animación de tapa y de páginas, a pantalla completa, con todo lo que has descubierto en tu partida.
 
@@ -43,7 +45,11 @@ Desinstalar: borra `dinput8.dll` (y si quieres la carpeta `CuadernoDS3`) de la c
 | Teclado | K | L | J | P |
 | Mando | L3 + R3 | R3 | L3 | — |
 
-Con el cuaderno abierto, el juego no recibe L3 ni R3. **El juego no se pausa**: ábrelo en zonas seguras. Todo se cambia en `Game\CuadernoDS3\config.ini` (teclas, botones, `escala`, `volumen`).
+Con el cuaderno abierto, el juego no recibe L3 ni R3. **El juego no se pausa**: ábrelo en zonas seguras. Todo se cambia en `Game\CuadernoDS3\config.ini` (teclas, botones, `escala`, `volumen`, `idioma`).
+
+## Idioma
+
+El cuaderno está en **español** e **inglés**. Con `idioma=auto` (por defecto) usa el idioma con el que Steam lanza el juego: español de España o Latinoamérica → español; cualquier otro → inglés. Para forzarlo, pon `idioma=es` o `idioma=en` en `config.ini`. Los nombres de lugares, jefes, objetos y personajes son los oficiales del juego en cada idioma. Las partidas guardadas no dependen del idioma.
 
 ## Archivos que crea
 

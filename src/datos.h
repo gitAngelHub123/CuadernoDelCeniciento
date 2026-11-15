@@ -30,7 +30,7 @@ enum ZonaId {
     Z_TOTAL, Z_ARENA = 100, Z_DESCONOCIDA = -1
 };
 
-static const Zona ZONAS[Z_TOTAL] = {
+static Zona ZONAS[Z_TOTAL] = {
     {u8"Cementerio de Ceniza",            {14000001, 14000002}, false},
     {u8"Santuario de Enlace del Fuego",   {14000000}, false},
     {u8"Gran muro de Lothric",            {13000009, 13000005, 13000002, 13000004}, false},
@@ -57,7 +57,7 @@ static const Zona ZONAS[Z_TOTAL] = {
 
 // Jefes en orden aproximado de la historia (nombres oficiales es-ES)
 struct JefeInfo { uint32_t flag; const char* nombre; bool dlc; int zona; };
-static const JefeInfo JEFES[] = {
+static JefeInfo JEFES[] = {
     {J_IUDEX, u8"Iudex Gundyr", false, Z_CEMENTERIO},                {J_VORDT, u8"Vordt del Valle Boreal", false, Z_GRAN_MURO},
     {J_ARBOL, u8"Gran Árbol corrompido", false, Z_ASENTAMIENTO},       {J_SABIO, u8"Sabio de cristal", false, Z_CAMINO},
     {J_DIACONOS, u8"Diáconos de la Oscuridad", false, Z_CATEDRAL}, {J_VIGILANTES, u8"Vigilantes del Abismo", false, Z_FARRON},
@@ -138,7 +138,7 @@ enum NpcId { N_SIRRIS, N_ANRI, N_HORACE, N_GREIRAT, N_SIEGWARD, N_IRINA, N_EYGON
              N_YORSHKA, N_EMMA, N_ANIDADO, N_PINTORA, N_GAEL, N_LAPP, N_SHIRA, N_ARPIA, N_TOTAL };
 
 // Textos escritos a partir de guías de la comunidad (Fextralife). Pendientes de verificar en partida.
-static const Npc NPCS[N_TOTAL] = {
+static Npc NPCS[N_TOTAL] = {
     { u8"Sirris de los Reinos sin sol", 8, {0x2EE5E, 1}, {0x8C, 6}, {0x92, 5},
       { {0,          u8"Habla con ella en el Santuario y escucha lo que busca."},
         {J_SABIO,    u8"Busca sus «Cenizas de soñador» y llévalas a la Sirvienta. Luego vuelve a hablar con ella."},
@@ -273,7 +273,7 @@ static inline int bloqueNpc(int n) {
 // ------------------------------------------------------------------ objetos clave
 // tipo: 0 arma, 1 armadura, 2 anillo, 4 objeto. "para": historia principal, misión de un NPC o utilidad.
 struct Objeto { uint32_t id; uint8_t tipo; const char* nombre; const char* para; const char* uso; };
-static const Objeto OBJETOS[] = {
+static Objeto OBJETOS[] = {
     {2137, 4, u8"Espada en espiral", u8"Historia principal", u8"Clávala en la hoguera del Santuario para viajar entre hogueras."},
     {2102, 4, u8"Estandarte peq. de Lothric", u8"Historia principal", u8"Álzalo en la puerta principal del castillo (Gran muro) para llegar al Asentamiento."},
     {2005, 4, u8"Muñeco pequeño", u8"Historia principal", u8"Te permite cruzar la barrera de entrada a Irithyll."},
@@ -331,7 +331,7 @@ static const char* DESTINOS[] = {u8"la Sirvienta del Santuario", u8"el herrero A
 static const char* DESBLOQUEA[] = {u8"amplía su tienda", u8"nuevas infusiones para tus armas", u8"nuevos milagros",
                                    u8"nuevas piromancias", u8"nuevos hechizos", u8"nuevas hechicerías"};
 struct Coleccionable { uint32_t id; uint8_t destino; const char* nombre; };
-static const Coleccionable COLECCIONABLES[] = {
+static Coleccionable COLECCIONABLES[] = {
     {2107, 0, u8"Cenizas de enterrador"}, {2108, 0, u8"Cenizas de soñador"}, {2109, 0, u8"Cenizas de paladín"},
     {2110, 0, u8"Cenizas guardián de cripta"}, {2146, 0, u8"Cenizas con excrementos"}, {2147, 0, u8"Cenizas jefe de prisioneros"},
     {2148, 0, u8"Cenizas de Xanthous"}, {2149, 0, u8"Cenizas de Hueco"}, {2151, 0, u8"Cenizas cazador de dragones"},

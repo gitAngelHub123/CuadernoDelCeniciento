@@ -18,6 +18,7 @@
 #include "sonido.h"
 #include "hogueras.h"
 #include "misiones_gen.h"
+#include "idioma.h"
 #include <mmsystem.h>
 
 namespace {
@@ -37,6 +38,7 @@ WORD mandoAbrir = XINPUT_GAMEPAD_LEFT_THUMB | XINPUT_GAMEPAD_RIGHT_THUMB, mandoS
 float escala = 1.0f;
 float volumen = 0.7f;
 bool mostrarIcono = true, diagnostico = true, demo = false;
+std::string idiomaConfig = "auto";   // auto | es | en
 int demoAccion = 1, demoVista = 1, demoPaso = -1, demoCuadro = 0, demoCaptura = 40;
 
 // vista: 0 cerrado, 1 zonas, 2.. páginas de NPCs
@@ -50,6 +52,13 @@ std::set<int> npcsConocidos, zonasVisitadas;
 std::set<uint32_t> objetosVistos, objetosAhora;
 std::map<int, ID3D11ShaderResourceView*> fotos;
 bool estadoSucio = false;
+
+// novedades: aviso "!" en el icono cuando algo nuevo entra al libro (persiste en estado.txt)
+std::set<long long> novedadesVistas, clavesAhora;   // claves ya vistas por el jugador / claves actuales del libro
+bool novedadesBase = false;      // la primera lectura de la partida ya se dio por vista (sin aviso)
+bool hayNovedad = false, inventarioLeido = false;
+ULONGLONG novedadesDesde = 0;    // cuándo se cargó la partida
+int demoNovedad = -1;            // demo: cuadro en que "aparece" algo nuevo
 
 // foto pendiente
 int fotoPendienteNpc = -1;
@@ -91,6 +100,23 @@ WORD botonesDeTexto(const char* v) {
     return r;
 }
 
+// Pasa al idioma elegido los nombres y textos de las tablas de datos.h y hogueras.h (una sola vez).
+void traducirTablas() {
+    if (!idioma::ingles()) return;
+    for (auto& z : ZONAS) z.nombre = T(z.nombre);
+    for (auto& j : JEFES) j.nombre = T(j.nombre);
+    for (auto& n : NPCS) {
+        n.nombre = T(n.nombre);
+        for (auto& p : n.pasos) if (p.texto) p.texto = T(p.texto);
+        for (auto& c : n.conexiones) { if (c.conNombre) c.conNombre = T(c.conNombre); if (c.anonimo) c.anonimo = T(c.anonimo); }
+    }
+    for (auto& o : OBJETOS) { o.nombre = T(o.nombre); o.para = T(o.para); o.uso = T(o.uso); }
+    for (auto& d : DESTINOS) d = T(d);
+    for (auto& d : DESBLOQUEA) d = T(d);
+    for (auto& c : COLECCIONABLES) c.nombre = T(c.nombre);
+    for (auto& h : HOGUERAS) h.nombre = T(h.nombre);
+}
+
 void cargarConfig() {
     std::string ruta = carpetaMod + "\\config.ini";
     FILE* f = fopen(ruta.c_str(), "r");
@@ -111,6 +137,8 @@ void cargarConfig() {
                   "escala=1.0\n"
                   "; volumen del sonido de página: 0 (sin sonido) a 1\n"
                   "volumen=0.7\n"
+                  "; idioma de los textos: auto (el del juego en Steam), es o en\n"
+                  "idioma=auto\n"
                   "mostrar_icono=1\n"
                   "diagnostico=1\n", f);
             fclose(f);
@@ -134,11 +162,13 @@ void cargarConfig() {
         else if (k == "mando_anterior") { if (WORD b = botonesDeTexto(v)) mandoAnterior = b; }
         else if (k == "escala") { float e = (float)atof(v); if (e >= 0.5f && e <= 3.f) escala = e; }
         else if (k == "volumen") { float e = (float)atof(v); if (e >= 0.f && e <= 1.f) volumen = e; }
+        else if (k == "idioma") { std::string x = v; for (auto& ch : x) ch = (char)tolower((unsigned char)ch); if (x == "es" || x == "en" || x == "auto") idiomaConfig = x; }
         else if (k == "mostrar_icono") mostrarIcono = atoi(v) != 0;
         else if (k == "diagnostico") diagnostico = atoi(v) != 0;
         else if (k == "demo") demo = atoi(v) != 0;
         else if (k == "demo_vista") demoVista = atoi(v);
         else if (k == "demo_paso") demoPaso = atoi(v);       // cuadro en que se "pulsa" J
+        else if (k == "demo_novedad") demoNovedad = atoi(v);   // cuadro en que aparece algo nuevo (prueba del aviso)
         else if (k == "demo_captura") demoCaptura = atoi(v); // cuadro de la captura
         else if (k == "demo_accion") demoAccion = atoi(v);   // 0 cuaderno, 1 siguiente, 2 anterior
     }
@@ -213,6 +243,7 @@ void guardarEstado() {
     for (int n : npcsConocidos) fprintf(f, "npc %d\n", n);
     for (int z : zonasVisitadas) fprintf(f, "zona %d\n", z);
     for (uint32_t o : objetosVistos) fprintf(f, "obj %u\n", o);
+    if (novedadesBase) { fprintf(f, "base 1\n"); for (long long k : novedadesVistas) fprintf(f, "visto %lld\n", k); }
     fclose(f);
     estadoSucio = false;
 }
@@ -245,6 +276,7 @@ void cambiarPartida(const std::wstring& nombre, int ranura) {
     guardarEstado();
     for (auto& [k, v] : fotos) if (v) v->Release();
     fotos.clear(); npcsConocidos.clear(); zonasVisitadas.clear(); objetosVistos.clear(); objetosAhora.clear();
+    novedadesVistas.clear(); clavesAhora.clear(); novedadesBase = false; hayNovedad = false; inventarioLeido = false; novedadesDesde = GetTickCount64();
     personaje = nombre;
     std::wstring limpio;
     for (wchar_t c : nombre) limpio += (wcschr(L"\\/:*?\"<>|", c) || c < 32) ? L'_' : c;
@@ -266,6 +298,8 @@ void cambiarPartida(const std::wstring& nombre, int ranura) {
             if (!strcmp(tipo, "npc")) npcsConocidos.insert((int)v);
             else if (!strcmp(tipo, "zona")) zonasVisitadas.insert((int)v);
             else if (!strcmp(tipo, "obj")) objetosVistos.insert((uint32_t)v);
+            else if (!strcmp(tipo, "base")) novedadesBase = true;
+            else if (!strcmp(tipo, "visto")) novedadesVistas.insert(v);
         }
         fclose(f);
     }
@@ -711,17 +745,17 @@ std::string paraAvanzar(int n, int fase) {
             std::string parte;
             if (int j = jefeDe93(f); j >= 0) {
                 bool visto = zonaDescubierta(JEFES[j].zona) || F(JEFES[j].flag);
-                std::string nom = visto ? JEFES[j].nombre : u8"cierto jefe";
-                parte = on ? u8"derrotar a " + nom : u8"antes de derrotar a " + nom;
+                const char* nom = visto ? JEFES[j].nombre : T(u8"cierto jefe");
+                parte = idioma::fmt(on ? u8"derrotar a %s" : u8"antes de derrotar a %s", nom);
             } else if (f >= 70000000 && f < 80000000 && on) {
                 int mapa = mapaDeArea((f / 100000) % 100);
-                parte = std::string(u8"hablar con ") + (n >= 0 ? u8"esta persona" : "") + (mapa ? std::string(u8" en ") + NOMBRE_MAPA[mapa] : "");
+                parte = std::string(T(n >= 0 ? u8"hablar con esta persona" : u8"hablar con")) + (mapa ? idioma::fmt(u8" en %s", T(NOMBRE_MAPA[mapa])) : "");
             } else if (int o = npcDeBloque(f); o >= 0 && o != n && (f - bloqueNpc(o)) == 18) {
-                if (conocido(o)) parte = on ? std::string(u8"que ") + NPCS[o].nombre + u8" haya muerto" : std::string(u8"que ") + NPCS[o].nombre + u8" siga con vida";
-                else parte = u8"algo que depende de alguien que aún no conoces";
+                if (conocido(o)) parte = idioma::fmt(on ? u8"que %s haya muerto" : u8"que %s siga con vida", NPCS[o].nombre);
+                else parte = T(u8"algo que depende de alguien que aún no conoces");
             }
             if (parte.empty() || r.find(parte) != std::string::npos) continue;   // sin repetir
-            if (!r.empty()) r += u8" y ";
+            if (!r.empty()) r += T(u8" y ");
             r += parte;
         }
         if (!r.empty()) return r;
@@ -737,61 +771,61 @@ struct Objetivo { const char* zona; const char* texto; };
 Objetivo objetivoPrincipal(std::vector<std::string>& extra) {
     auto opc = [&](bool cond, const char* t) { if (cond && extra.size() < 3) extra.push_back(t); };
     bool asent = algunaHoguera(Z_ASENTAMIENTO), cata = algunaHoguera(Z_CATACUMBAS);
-    opc(asent && !F(J_ARBOL), u8"Opcional: Gran Árbol corrompido, en el Asentamiento de no muertos.");
-    opc(F(J_WOLNIR) && !F(J_REY_DEMONIO) && algunaHoguera(Z_LAGO), u8"Opcional: Viejo rey demonio, en el Lago Ardiente.");
-    opc(F(J_BAILARINA) && !F(J_OCEIROS), u8"Opcional: Oceiros, en el Jardín del Rey Consumido.");
-    opc(F(J_OCEIROS) && !F(J_CAMPEON_GUNDYR), u8"Opcional: algo aguarda tras un muro ilusorio cerca de Oceiros.");
-    opc(F(J_OCEIROS) && !F(J_REY_SIN_NOMBRE), u8"Opcional: el gesto «Camino del dragón» abre el Pico del Archidragón.");
+    opc(asent && !F(J_ARBOL), T(u8"Opcional: Gran Árbol corrompido, en el Asentamiento de no muertos."));
+    opc(F(J_WOLNIR) && !F(J_REY_DEMONIO) && algunaHoguera(Z_LAGO), T(u8"Opcional: Viejo rey demonio, en el Lago Ardiente."));
+    opc(F(J_BAILARINA) && !F(J_OCEIROS), T(u8"Opcional: Oceiros, en el Jardín del Rey Consumido."));
+    opc(F(J_OCEIROS) && !F(J_CAMPEON_GUNDYR), T(u8"Opcional: algo aguarda tras un muro ilusorio cerca de Oceiros."));
+    opc(F(J_OCEIROS) && !F(J_REY_SIN_NOMBRE), T(u8"Opcional: el gesto «Camino del dragón» abre el Pico del Archidragón."));
 
-    if (!F(J_IUDEX))   return {u8"Cementerio de Ceniza", u8"Sube por el cementerio y derrota a Iudex Gundyr."};
-    if (!F(14000000))  return {u8"Santuario de Enlace del Fuego", u8"Entra en el Santuario y clava la Espada en espiral en su hoguera."};
-    if (!F(J_VORDT))   return {u8"Gran muro de Lothric", u8"Viaja al Gran muro desde la hoguera del Santuario y abre camino hasta Vordt del Valle Boreal."};
-    if (!asent)        return {u8"Asentamiento de no muertos", u8"Habla con Emma en la capilla del Gran muro y alza el Estandarte peq. de Lothric en la puerta principal del castillo."};
-    if (!algunaHoguera(Z_CAMINO)) return {u8"Camino de los Sacrificios", u8"Cruza el Asentamiento de no muertos hasta llegar al Camino de los Sacrificios."};
-    if (!F(J_SABIO))   return {u8"Camino de los Sacrificios", u8"Atraviesa los Bosques de crucifixión y derrota al Sabio de cristal."};
+    if (!F(J_IUDEX))   return {T(u8"Cementerio de Ceniza"), T(u8"Sube por el cementerio y derrota a Iudex Gundyr.")};
+    if (!F(14000000))  return {T(u8"Santuario de Enlace del Fuego"), T(u8"Entra en el Santuario y clava la Espada en espiral en su hoguera.")};
+    if (!F(J_VORDT))   return {T(u8"Gran muro de Lothric"), T(u8"Viaja al Gran muro desde la hoguera del Santuario y abre camino hasta Vordt del Valle Boreal.")};
+    if (!asent)        return {T(u8"Asentamiento de no muertos"), T(u8"Habla con Emma en la capilla del Gran muro y alza el Estandarte peq. de Lothric en la puerta principal del castillo.")};
+    if (!algunaHoguera(Z_CAMINO)) return {T(u8"Camino de los Sacrificios"), T(u8"Cruza el Asentamiento de no muertos hasta llegar al Camino de los Sacrificios.")};
+    if (!F(J_SABIO))   return {T(u8"Camino de los Sacrificios"), T(u8"Atraviesa los Bosques de crucifixión y derrota al Sabio de cristal.")};
     if (!F(J_VIGILANTES)) {
-        opc(!F(J_DIACONOS), u8"También: en la Catedral de la Oscuridad, los Diáconos guardan el Muñeco pequeño, necesario para entrar en Irithyll.");
-        return {u8"Torreón de Farron", u8"Apaga las tres llamas del torreón y derrota a los Vigilantes del Abismo."};
+        opc(!F(J_DIACONOS), T(u8"También: en la Catedral de la Oscuridad, los Diáconos guardan el Muñeco pequeño, necesario para entrar en Irithyll."));
+        return {T(u8"Torreón de Farron"), T(u8"Apaga las tres llamas del torreón y derrota a los Vigilantes del Abismo.")};
     }
-    if (!F(J_DIACONOS)) return {u8"Catedral de la Oscuridad", u8"Llega al fondo de la Catedral y derrota a los Diáconos: te darán el Muñeco pequeño."};
+    if (!F(J_DIACONOS)) return {T(u8"Catedral de la Oscuridad"), T(u8"Llega al fondo de la Catedral y derrota a los Diáconos: te darán el Muñeco pequeño.")};
     if (!algunaHoguera(Z_IRITHYLL)) {
-        opc(cata && !F(J_WOLNIR), u8"En lo profundo de las Catacumbas espera el Gran Señor Wolnir.");
-        return {u8"Irithyll del Valle Boreal", u8"Tras los Vigilantes, cruza las Catacumbas de Carthus. Al otro lado, el Muñeco pequeño te dejará pasar a Irithyll."};
+        opc(cata && !F(J_WOLNIR), T(u8"En lo profundo de las Catacumbas espera el Gran Señor Wolnir."));
+        return {T(u8"Irithyll del Valle Boreal"), T(u8"Tras los Vigilantes, cruza las Catacumbas de Carthus. Al otro lado, el Muñeco pequeño te dejará pasar a Irithyll.")};
     }
-    if (!F(J_PONTIFICE)) return {u8"Irithyll del Valle Boreal", u8"Atraviesa Irithyll hasta su iglesia y derrota al Pontífice Sulyvahn."};
+    if (!F(J_PONTIFICE)) return {T(u8"Irithyll del Valle Boreal"), T(u8"Atraviesa Irithyll hasta su iglesia y derrota al Pontífice Sulyvahn.")};
     if (!F(J_ALDRICH) || !F(J_YHORM)) {
         if (!F(J_ALDRICH) && !F(J_YHORM))
-            opc(true, u8"También: baja a la Mazmorra de Irithyll y sigue hasta la Capital Profanada (Yhorm, el Gigante).");
-        if (!F(J_ALDRICH)) return {u8"Anor Londo", u8"Tras el Pontífice, sube a Anor Londo y derrota a Aldrich, el Devoradioses."};
-        return {u8"Capital Profanada", u8"Atraviesa la Mazmorra de Irithyll hasta la Capital Profanada y derrota a Yhorm, el Gigante."};
+            opc(true, T(u8"También: baja a la Mazmorra de Irithyll y sigue hasta la Capital Profanada (Yhorm, el Gigante)."));
+        if (!F(J_ALDRICH)) return {T(u8"Anor Londo"), T(u8"Tras el Pontífice, sube a Anor Londo y derrota a Aldrich, el Devoradioses.")};
+        return {T(u8"Capital Profanada"), T(u8"Atraviesa la Mazmorra de Irithyll hasta la Capital Profanada y derrota a Yhorm, el Gigante.")};
     }
-    if (!F(J_BAILARINA)) return {u8"Gran muro de Lothric", u8"Vuelve a la capilla de Emma en el Gran muro: allí obtendrás la Jofaina de votos. Úsala en la estatua del caballero."};
-    if (!F(J_ARMADURA)) return {u8"Castillo de Lothric", u8"Sube la escalera tras la Bailarina, cruza el Castillo de Lothric y derrota a la Armadura del Asesino de dragones."};
-    if (!F(J_PRINCIPES)) return {u8"Gran Archivo", u8"Abre el Gran Archivo con su llave y llega hasta los Príncipes Gemelos."};
-    if (!F(J_ALMA_CENIZAS)) return {u8"Horno de la Primera Llama", u8"Lleva las Cenizas de un Señor a los tronos del Santuario y habla con la Guardiana del Fuego."};
-    return {u8"Historia completada", u8"Has terminado la historia principal. Quedan las zonas opcionales que aún no hayas visto."};
+    if (!F(J_BAILARINA)) return {T(u8"Gran muro de Lothric"), T(u8"Vuelve a la capilla de Emma en el Gran muro: allí obtendrás la Jofaina de votos. Úsala en la estatua del caballero.")};
+    if (!F(J_ARMADURA)) return {T(u8"Castillo de Lothric"), T(u8"Sube la escalera tras la Bailarina, cruza el Castillo de Lothric y derrota a la Armadura del Asesino de dragones.")};
+    if (!F(J_PRINCIPES)) return {T(u8"Gran Archivo"), T(u8"Abre el Gran Archivo con su llave y llega hasta los Príncipes Gemelos.")};
+    if (!F(J_ALMA_CENIZAS)) return {T(u8"Horno de la Primera Llama"), T(u8"Lleva las Cenizas de un Señor a los tronos del Santuario y habla con la Guardiana del Fuego.")};
+    return {T(u8"Historia completada"), T(u8"Has terminado la historia principal. Quedan las zonas opcionales que aún no hayas visto.")};
 }
 
 // Hitos de la historia principal, en orden (para la hoja de misiones).
 struct Hito { const char* texto; bool hecho; };
 std::vector<Hito> hitosPrincipales() {
     return {
-        {u8"Derrotar a Iudex Gundyr", F(J_IUDEX)},
-        {u8"Encender la hoguera del Santuario", F(14000000)},
-        {u8"Derrotar a Vordt del Valle Boreal", F(J_VORDT)},
-        {u8"Llegar al Asentamiento de no muertos", algunaHoguera(Z_ASENTAMIENTO)},
-        {u8"Llegar al Camino de los Sacrificios", algunaHoguera(Z_CAMINO)},
-        {u8"Derrotar al Sabio de cristal", F(J_SABIO)},
-        {u8"Derrotar a los Vigilantes del Abismo", F(J_VIGILANTES)},
-        {u8"Conseguir el Muñeco pequeño (Diáconos)", F(J_DIACONOS)},
-        {u8"Llegar a Irithyll del Valle Boreal", algunaHoguera(Z_IRITHYLL)},
-        {u8"Derrotar al Pontífice Sulyvahn", F(J_PONTIFICE)},
-        {u8"Derrotar a Aldrich, el Devoradioses", F(J_ALDRICH)},
-        {u8"Derrotar a Yhorm, el Gigante", F(J_YHORM)},
-        {u8"Derrotar a la Bailarina del Valle Boreal", F(J_BAILARINA)},
-        {u8"Derrotar a la Armadura del Asesino de dragones", F(J_ARMADURA)},
-        {u8"Derrotar a los Príncipes Gemelos", F(J_PRINCIPES)},
-        {u8"Avivar la Primera Llama: Alma de Cenizas", F(J_ALMA_CENIZAS)},
+        {T(u8"Derrotar a Iudex Gundyr"), F(J_IUDEX)},
+        {T(u8"Encender la hoguera del Santuario"), F(14000000)},
+        {T(u8"Derrotar a Vordt del Valle Boreal"), F(J_VORDT)},
+        {T(u8"Llegar al Asentamiento de no muertos"), algunaHoguera(Z_ASENTAMIENTO)},
+        {T(u8"Llegar al Camino de los Sacrificios"), algunaHoguera(Z_CAMINO)},
+        {T(u8"Derrotar al Sabio de cristal"), F(J_SABIO)},
+        {T(u8"Derrotar a los Vigilantes del Abismo"), F(J_VIGILANTES)},
+        {T(u8"Conseguir el Muñeco pequeño (Diáconos)"), F(J_DIACONOS)},
+        {T(u8"Llegar a Irithyll del Valle Boreal"), algunaHoguera(Z_IRITHYLL)},
+        {T(u8"Derrotar al Pontífice Sulyvahn"), F(J_PONTIFICE)},
+        {T(u8"Derrotar a Aldrich, el Devoradioses"), F(J_ALDRICH)},
+        {T(u8"Derrotar a Yhorm, el Gigante"), F(J_YHORM)},
+        {T(u8"Derrotar a la Bailarina del Valle Boreal"), F(J_BAILARINA)},
+        {T(u8"Derrotar a la Armadura del Asesino de dragones"), F(J_ARMADURA)},
+        {T(u8"Derrotar a los Príncipes Gemelos"), F(J_PRINCIPES)},
+        {T(u8"Avivar la Primera Llama: Alma de Cenizas"), F(J_ALMA_CENIZAS)},
     };
 }
 
@@ -916,10 +950,21 @@ void fondoPapel(ImDrawList* dl, ImVec2 a, ImVec2 b, float alfa) {
     dl->AddRect(ImVec2(a.x + 6, a.y + 6), ImVec2(b.x - 6, b.y - 6), IM_COL32(120, 85, 50, (int)(70 * alfa)), 4, 0, 1);
 }
 
-void icono(ImDrawList* dl, ImVec2 p, float s, bool aviso) {
+void icono(ImDrawList* dl, ImVec2 p, float s, bool aviso, bool novedad = false) {
     const float t = 46 * s;   // pergamino pixelado (recursos/icono_pergamino.png)
     if (texIcono) dl->AddImage((ImTextureID)texIcono, ImVec2(p.x - 8 * s, p.y), ImVec2(p.x - 8 * s + t, p.y + t));
     if (aviso) dl->AddCircleFilled(ImVec2(p.x + 30 * s, p.y + 6 * s), 5 * s, ROJO);
+    if (novedad) {   // "!" amarillo con borde negro, en el borde izquierdo del icono, que late despacio: hay algo nuevo en el libro
+        float pulso = 1.f + 0.12f * sinf((float)ImGui::GetTime() * 4.f);
+        ImVec2 c(p.x + 1 * s, p.y + 12 * s);   // en el borde izquierdo del icono, sobresaliendo un poco
+        float k = s * 0.72f * pulso, borde = 2.6f * k;
+        ImVec2 a0(c.x - 3.6f * k, c.y - 15.f * k), a1(c.x + 3.6f * k, c.y + 3.f * k);   // barra
+        ImVec2 pt(c.x, c.y + 11.f * k); float rp = 4.2f * k;                              // punto
+        dl->AddRectFilled(ImVec2(a0.x - borde, a0.y - borde), ImVec2(a1.x + borde, a1.y + borde), IM_COL32(0, 0, 0, 255), 3.f * k);
+        dl->AddCircleFilled(pt, rp + borde, IM_COL32(0, 0, 0, 255));
+        dl->AddRectFilled(a0, a1, IM_COL32(255, 214, 0, 255), 2.f * k);
+        dl->AddCircleFilled(pt, rp, IM_COL32(255, 214, 0, 255));
+    }
 }
 
 // ---------------------------------------------------------------- libro: texto sobre draw lists
@@ -969,14 +1014,14 @@ std::vector<int> npcsVisibles() {
 constexpr int NPCS_POR_HOJA = 3;
 
 void hojaZonasIzq(Lienzo& L, int zonaAct) {
-    L.centrado(fCursiva, TINTA_SUAVE, u8"~ Cuaderno del Ceniciento ~");
+    L.centrado(fCursiva, TINTA_SUAVE, T(u8"~ Cuaderno del Ceniciento ~"));
     L.espacio(14);
-    L.texto(fPeque, TINTA_SUAVE, u8"Estás en:", 2 * E);
-    L.texto(fTitulo, TINTA, zonaAct >= 0 && zonaAct < Z_TOTAL ? ZONAS[zonaAct].nombre : (zonaAct == Z_ARENA ? u8"Arena" : u8"Lugar desconocido"));
+    L.texto(fPeque, TINTA_SUAVE, T(u8"Estás en:"), 2 * E);
+    L.texto(fTitulo, TINTA, zonaAct >= 0 && zonaAct < Z_TOTAL ? ZONAS[zonaAct].nombre : (zonaAct == Z_ARENA ? T(u8"Arena") : T(u8"Lugar desconocido")));
     L.separador();
     std::vector<std::string> extra;
     Objetivo o = objetivoPrincipal(extra);
-    L.texto(fPeque, TINTA_SUAVE, u8"Debes seguir hacia:", 2 * E);
+    L.texto(fPeque, TINTA_SUAVE, T(u8"Debes seguir hacia:"), 2 * E);
     L.texto(fTitulo, TINTA, o.zona, 6 * E);
     L.texto(fCursiva, TINTA_SUAVE, o.texto, 10 * E);
     for (auto& e : extra) L.texto(fCursiva, TINTA_SUAVE, e.c_str(), 8 * E);
@@ -998,10 +1043,10 @@ void hojaZonasIzq(Lienzo& L, int zonaAct) {
 
     // Señores de la Ceniza
     std::vector<std::pair<const char*, bool>> senores = {
-        {u8"Vigilantes del Abismo", F(J_VIGILANTES)}, {u8"Aldrich, el Devoradioses", F(J_ALDRICH)},
-        {u8"Yhorm, el Gigante", F(J_YHORM)}, {u8"Lothric, joven príncipe", F(J_PRINCIPES)}};
+        {T(u8"Vigilantes del Abismo"), F(J_VIGILANTES)}, {T(u8"Aldrich, el Devoradioses"), F(J_ALDRICH)},
+        {T(u8"Yhorm, el Gigante"), F(J_YHORM)}, {T(u8"Lothric, joven príncipe"), F(J_PRINCIPES)}};
     int ns = 0; for (auto& x : senores) ns += x.second;
-    char t[64]; snprintf(t, sizeof t, u8"Señores de la Ceniza (%d/4)", ns);
+    char t[64]; snprintf(t, sizeof t, T(u8"Señores de la Ceniza (%d/4)"), ns);
     L.texto(fTexto, TINTA, t, 4 * E);
     lista(senores);
     L.espacio(10);
@@ -1014,7 +1059,7 @@ void hojaZonasIzq(Lienzo& L, int zonaAct) {
             for (auto& n : HOGUERAS) if (n.flag == h) hs.push_back({n.nombre, F(h)});
         }
         int enc = 0; for (auto& x : hs) enc += x.second;
-        snprintf(t, sizeof t, u8"Hogueras de esta zona (%d/%d)", enc, (int)hs.size());
+        snprintf(t, sizeof t, T(u8"Hogueras de esta zona (%d/%d)"), enc, (int)hs.size());
         L.texto(fTexto, TINTA, t, 4 * E);
         lista(hs);
     }
@@ -1023,7 +1068,7 @@ void hojaZonasIzq(Lienzo& L, int zonaAct) {
 void hojaZonasDer(Lienzo& L, int zonaAct) {
     int base = 0, total = 0;
     for (int z = 0; z < Z_TOTAL; ++z) { if (!ZONAS[z].dlc) ++total; if (zonaDescubierta(z) && !ZONAS[z].dlc) ++base; }
-    char t[96]; snprintf(t, sizeof t, u8"Zonas descubiertas (%d/%d)", base, total);
+    char t[96]; snprintf(t, sizeof t, T(u8"Zonas descubiertas (%d/%d)"), base, total);
     L.centrado(fTexto, TINTA, t);
     L.separador();
     float filaH = fPeque->FontSize * 1.28f;
@@ -1086,7 +1131,7 @@ void actualizarInventario() {
     ultimo = GetTickCount64();
     std::set<uint32_t> inv;
     if (!g.inventario(inv)) return;
-    objetosAhora = inv;
+    objetosAhora = inv; inventarioLeido = true;
     for (const Objeto& o : OBJETOS)
         if (loTiene(o) && objetosVistos.insert(idCompleto(o)).second) { estadoSucio = true; logf("Objeto clave: %s", o.nombre); }
     for (const Coleccionable& c : COLECCIONABLES)
@@ -1148,7 +1193,7 @@ void filaMarcada(Lienzo& L, ImFont* f, const char* txt, bool marcado, bool tacha
 void hojaPrincipales(Lienzo& L) {
     auto hitos = hitosPrincipales();
     int hechos = 0; for (auto& h : hitos) hechos += h.hecho;
-    char t[64]; snprintf(t, sizeof t, u8"Misiones principales (%d/%d)", hechos, (int)hitos.size());
+    char t[64]; snprintf(t, sizeof t, T(u8"Misiones principales (%d/%d)"), hechos, (int)hitos.size());
     titulo(L, t, true);
     float alto = fPeque->FontSize * 1.3f;
     bool actualMostrada = false; int ocultas = 0;
@@ -1157,13 +1202,13 @@ void hojaPrincipales(Lienzo& L) {
         else if (!actualMostrada) { filaMarcada(L, fPeque, h.texto, false, false, ROJO, alto); actualMostrada = true; }
         else ++ocultas;
     }
-    if (ocultas) { snprintf(t, sizeof t, u8"… y %d más por descubrir", ocultas); L.x += 28 * E; L.texto(fCursiva, TINTA_SUAVE, t); L.x = L.x0; }
+    if (ocultas) { snprintf(t, sizeof t, T(u8"… y %d más por descubrir"), ocultas); L.x += 28 * E; L.texto(fCursiva, TINTA_SUAVE, t); L.x = L.x0; }
 }
 
 void hojaSecundarias(Lienzo& L, const Pagina& pg) {
-    titulo(L, u8"Misiones secundarias", pg.primera);
+    titulo(L, T(u8"Misiones secundarias"), pg.primera);
     auto v = npcsVisibles();
-    if (v.empty()) { L.texto(fCursiva, TINTA_SUAVE, u8"Aún no conoces a nadie. Las misiones de las personas que conozcas aparecerán aquí."); return; }
+    if (v.empty()) { L.texto(fCursiva, TINTA_SUAVE, T(u8"Aún no conoces a nadie. Las misiones de las personas que conozcas aparecerán aquí.")); return; }
     float alto = fPeque->FontSize * 1.3f;
     for (int k = pg.desde; k < pg.hasta; ++k) {
         const Npc& n = NPCS[v[k]];
@@ -1174,26 +1219,26 @@ void hojaSecundarias(Lienzo& L, const Pagina& pg) {
         bool final_ = fase && prof > 0 && !tieneSalida(fase);
         bool muerto = muertoNpc(idx) || final_;   // lo que el juego confirma: muerte o fase final
         char linea[160];
-        if (muerto) snprintf(linea, sizeof linea, u8"%s (terminó)", n.nombre);
+        if (muerto) snprintf(linea, sizeof linea, T(u8"%s (terminó)"), n.nombre);
         else if (total <= 1) snprintf(linea, sizeof linea, u8"%s", n.nombre);
-        else if (paso == total - 1) snprintf(linea, sizeof linea, u8"%s — último paso", n.nombre);
-        else snprintf(linea, sizeof linea, u8"%s — paso %d de %d", n.nombre, paso + 1, total);
+        else if (paso == total - 1) snprintf(linea, sizeof linea, T(u8"%s — último paso"), n.nombre);
+        else snprintf(linea, sizeof linea, T(u8"%s — paso %d de %d"), n.nombre, paso + 1, total);
         filaMarcada(L, fPeque, linea, muerto, muerto, muerto ? TINTA_SUAVE : TINTA, alto);
     }
 }
 
 void hojaObjetos(Lienzo& L, const Pagina& pg) {
     auto v = objetosVisibles();
-    char t[64]; snprintf(t, sizeof t, u8"Objetos clave (%d/%d)", (int)v.size(), N_OBJETOS);
+    char t[64]; snprintf(t, sizeof t, T(u8"Objetos clave (%d/%d)"), (int)v.size(), N_OBJETOS);
     titulo(L, t, pg.primera);
-    if (v.empty()) { L.texto(fCursiva, TINTA_SUAVE, u8"Aún no has encontrado objetos clave. Los que consigas aparecerán aquí con su uso."); return; }
+    if (v.empty()) { L.texto(fCursiva, TINTA_SUAVE, T(u8"Aún no has encontrado objetos clave. Los que consigas aparecerán aquí con su uso.")); return; }
     for (int k = pg.desde; k < pg.hasta; ++k) {
         const Objeto& o = OBJETOS[v[k]];
         bool tiene = loTiene(o);
         marca(L.dl, ImVec2(L.x + 4 * E, L.y + 9 * E), E, tiene, L.alfa);
         L.x = L.x0 + 28 * E;
         L.texto(fTexto, tiene ? TINTA : TINTA_SUAVE, o.nombre, 0);
-        char sub[128]; snprintf(sub, sizeof sub, u8"%s · %s", o.para, tiene ? u8"lo tienes" : u8"ya lo usaste o entregaste");
+        char sub[128]; snprintf(sub, sizeof sub, u8"%s · %s", o.para, tiene ? T(u8"lo tienes") : T(u8"ya lo usaste o entregaste"));
         L.texto(fCursiva, tiene ? ROJO : TINTA_SUAVE, sub, 0);
         L.texto(fPeque, TINTA_SUAVE, o.uso, 10 * E);
         L.x = L.x0;
@@ -1207,17 +1252,17 @@ void hojaColeccionables(Lienzo& L, const Pagina& pg) {
         ++total; uint32_t id = 0x40000000u | c.id;
         if (objetosAhora.count(id)) ++pendientes; else if (objetosVistos.count(id)) ++hechos;
     }
-    char t[96]; snprintf(t, sizeof t, u8"Coleccionables (%d entregados, %d por entregar)", hechos, pendientes);
+    char t[96]; snprintf(t, sizeof t, T(u8"Coleccionables (%d entregados, %d por entregar)"), hechos, pendientes);
     titulo(L, t, pg.primera);
     float alto = fPeque->FontSize * 1.3f;
     for (int k = pg.desde; k < pg.hasta; ++k) {
         const FilaCol& f = filas[k];
         if (k == pg.desde && f.item >= 0) {   // el grupo viene de la página anterior: repetir su encabezado
-            char h[128]; snprintf(h, sizeof h, u8"Para %s (%s)", DESTINOS[f.destino], DESBLOQUEA[f.destino]);
+            char h[128]; snprintf(h, sizeof h, T(u8"Para %s (%s)"), DESTINOS[f.destino], DESBLOQUEA[f.destino]);
             L.texto(fCursiva, TINTA_SUAVE, h, 2 * E);
         }
         if (f.item < 0) {
-            char h[128]; snprintf(h, sizeof h, u8"Para %s (%s)", DESTINOS[f.destino], DESBLOQUEA[f.destino]);
+            char h[128]; snprintf(h, sizeof h, T(u8"Para %s (%s)"), DESTINOS[f.destino], DESBLOQUEA[f.destino]);
             if (k != pg.desde) L.espacio(6);
             L.texto(fCursiva, TINTA_SUAVE, h, 2 * E);
             continue;
@@ -1226,8 +1271,8 @@ void hojaColeccionables(Lienzo& L, const Pagina& pg) {
         uint32_t id = 0x40000000u | c.id;
         bool tiene = objetosAhora.count(id) > 0, entregado = !tiene && objetosVistos.count(id) > 0;
         char linea[160];
-        if (tiene) snprintf(linea, sizeof linea, u8"%s — lo tienes: llévaselo", c.nombre);
-        else if (entregado) snprintf(linea, sizeof linea, u8"%s — entregado", c.nombre);
+        if (tiene) snprintf(linea, sizeof linea, T(u8"%s — lo tienes: llévaselo"), c.nombre);
+        else if (entregado) snprintf(linea, sizeof linea, T(u8"%s — entregado"), c.nombre);
         else snprintf(linea, sizeof linea, "???");
         filaMarcada(L, fPeque, linea, entregado, entregado, tiene ? ROJO : (entregado ? TINTA_SUAVE : TINTA_SUAVE), alto);
     }
@@ -1237,14 +1282,14 @@ void hojaJefes(Lienzo& L, const Pagina& pg) {
     auto v = jefesVisibles();
     int muertos = 0, base = 0;
     for (int i : v) { if (!JEFES[i].dlc) ++base; if (!JEFES[i].dlc && F(JEFES[i].flag)) ++muertos; }
-    char t[64]; snprintf(t, sizeof t, u8"Jefes derrotados (%d/%d)", muertos, base);
+    char t[64]; snprintf(t, sizeof t, T(u8"Jefes derrotados (%d/%d)"), muertos, base);
     titulo(L, t, pg.primera);
     bool dlcTitulo = false;
     for (int k = pg.desde; k < pg.hasta; ++k) {
         const JefeInfo& j = JEFES[v[k]];
         if (j.dlc && !dlcTitulo) {
             dlcTitulo = true;
-            if (k == 0 || !JEFES[v[k - 1]].dlc) { L.espacio(4); L.texto(fCursiva, TINTA_SUAVE, u8"Contenido descargable", 4 * E); }
+            if (k == 0 || !JEFES[v[k - 1]].dlc) { L.espacio(4); L.texto(fCursiva, TINTA_SUAVE, T(u8"Contenido descargable"), 4 * E); }
         }
         bool d = F(j.flag);
         float y0 = L.y;
@@ -1252,8 +1297,8 @@ void hojaJefes(Lienzo& L, const Pagina& pg) {
         L.x = L.x0 + 28 * E;
         L.texto(fTexto, d ? TINTA : TINTA_SUAVE, d ? j.nombre : "???", 0);
         char sub[128];
-        if (d) snprintf(sub, sizeof sub, u8"%s · derrotado", ZONAS[j.zona].nombre);
-        else snprintf(sub, sizeof sub, u8"pendiente");   // la zona no se revela hasta vencerlo
+        if (d) snprintf(sub, sizeof sub, T(u8"%s · derrotado"), ZONAS[j.zona].nombre);
+        else snprintf(sub, sizeof sub, T(u8"pendiente"));   // la zona no se revela hasta vencerlo
         L.texto(fCursiva, d ? TINTA_SUAVE : IM_COL32(120, 92, 62, 255), sub, 8 * E);
         L.x = L.x0;
         (void)y0;
@@ -1262,8 +1307,8 @@ void hojaJefes(Lienzo& L, const Pagina& pg) {
 
 void hojaNpcs(Lienzo& L, const Pagina& pg) {
     auto v = npcsVisibles();
-    titulo(L, u8"Personas que conociste", pg.primera);
-    if (v.empty()) { L.texto(fCursiva, TINTA_SUAVE, u8"Aún no has hablado con nadie. Cuando hables con alguien, aparecerá aquí con su retrato."); return; }
+    titulo(L, T(u8"Personas que conociste"), pg.primera);
+    if (v.empty()) { L.texto(fCursiva, TINTA_SUAVE, T(u8"Aún no has hablado con nadie. Cuando hables con alguien, aparecerá aquí con su retrato.")); return; }
     for (int k = pg.desde; k < pg.hasta; ++k) {
         int i = v[k]; const Npc& n = NPCS[i];
         float lado_f = 128 * E, y0 = L.y;
@@ -1273,7 +1318,7 @@ void hojaNpcs(Lienzo& L, const Pagina& pg) {
         if (fotos.count(i) && fotos[i]) dl->AddImage((ImTextureID)fotos[i], p, ImVec2(p.x + lado_f, p.y + lado_f), ImVec2(0, 0), ImVec2(1, 1), conAlfa(IM_COL32_WHITE, L.alfa));
         else {
             dl->AddRectFilled(p, ImVec2(p.x + lado_f, p.y + lado_f), conAlfa(IM_COL32(200, 180, 140, 255), L.alfa));
-            const char* sf = u8"sin retrato";
+            const char* sf = T(u8"sin retrato");
             float tw = fPeque->CalcTextSizeA(fPeque->FontSize, FLT_MAX, 0, sf).x;
             dl->AddText(fPeque, fPeque->FontSize, ImVec2(p.x + (lado_f - tw) / 2, p.y + lado_f / 2 - fPeque->FontSize / 2), conAlfa(TINTA_SUAVE, L.alfa), sf);
         }
@@ -1283,11 +1328,11 @@ void hojaNpcs(Lienzo& L, const Pagina& pg) {
         int idx = (int)(&n - NPCS), fase = faseActual(idx);
         const char* lugar = fase ? lugarDeFase(fase) : nullptr;
         std::string avanzar = fase ? paraAvanzar(idx, fase) : "";
-        if (muertoNpc(idx)) L.texto(fPeque, ROJO, u8"Ha muerto. Su historia terminó.");
+        if (muertoNpc(idx)) L.texto(fPeque, ROJO, T(u8"Ha muerto. Su historia terminó."));
         else {
-            if (lugar) { std::string t = std::string(u8"Ahora está en ") + lugar + "."; L.texto(fPeque, TINTA, t.c_str(), 2 * E); }
-            if (!avanzar.empty()) { std::string t = u8"Para avanzar: " + avanzar + "."; t[14] = (char)toupper(t[14]); L.texto(fPeque, TINTA, t.c_str(), 2 * E); }
-            else if (fase && !tieneSalida(fase) && profundidad(fase) > 0) L.texto(fPeque, TINTA_SUAVE, u8"Su historia parece haber llegado a su fin.", 2 * E);
+            if (lugar) { std::string t = idioma::fmt(u8"Ahora está en %s.", T(lugar)); L.texto(fPeque, TINTA, t.c_str(), 2 * E); }
+            if (!avanzar.empty()) { std::string pre = T(u8"Para avanzar: "), t = pre + avanzar + "."; t[pre.size()] = (char)toupper((unsigned char)t[pre.size()]); L.texto(fPeque, TINTA, t.c_str(), 2 * E); }
+            else if (fase && !tieneSalida(fase) && profundidad(fase) > 0) L.texto(fPeque, TINTA_SUAVE, T(u8"Su historia parece haber llegado a su fin."), 2 * E);
             L.texto(fCursiva, TINTA_SUAVE, n.pasos[pasoActual(n)].texto, 4 * E);
             for (const Conexion& c : n.conexiones) {
                 if (!c.conNombre) break;
@@ -1384,8 +1429,8 @@ void hojaGirando(ImDrawList* dl, const Libro& lb, float f, int vistaFrente, int 
     ImVec4 clip(x0, lb.derA.y, x1, lb.derB.y);
     if (v < 0) {   // tapa: título en dorado
         if (derecha && c > 0.55f) {
-            ImFont* ft = fTitulo; const char* t1 = u8"Cuaderno del";
-            const char* t2 = u8"Ceniciento";
+            ImFont* ft = fTitulo; const char* t1 = T(u8"Cuaderno del");
+            const char* t2 = T(u8"Ceniciento");
             float cx = lb.lomo + (xLibre - lb.lomo) / 2, cy = (lb.derA.y + lb.derB.y) / 2;
             ImU32 oro = conAlfa(IM_COL32(214, 172, 96, 255), alfa * (c - 0.55f) / 0.45f);
             for (const char* t : {t1, t2}) {
@@ -1416,8 +1461,8 @@ float suaviza(float t) { t = fminf(1.f, fmaxf(0.f, t)); return t * t * (3 - 2 * 
 void ayudaControles(ImDrawList* dl, const Libro& lb, float alfa) {
     auto letra = [](int k) { return (k >= 'A' && k <= 'Z') ? (char)k : '?'; };
     char pie[128];
-    if (usandoMando) snprintf(pie, sizeof pie, u8"L3 / R3: pasar página        L3 + R3: cerrar");
-    else snprintf(pie, sizeof pie, u8"%c / %c: pasar página        %c: cerrar",
+    if (usandoMando) snprintf(pie, sizeof pie, T(u8"L3 / R3: pasar página        L3 + R3: cerrar"));
+    else snprintf(pie, sizeof pie, T(u8"%c / %c: pasar página        %c: cerrar"),
                   letra(teclaAnterior), letra(teclaSiguiente), letra(teclaCuaderno));
     float sz = fCursiva->FontSize * 0.85f;
     float tw = fCursiva->CalcTextSizeA(sz, FLT_MAX, 0, pie).x;
@@ -1574,6 +1619,8 @@ void iniciar(ID3D11Device* d, ID3D11DeviceContext* c, HWND h, const char* carpet
     carpetaMod = carpetaJuego + "\\CuadernoDS3";
     CreateDirectoryA(carpetaMod.c_str(), nullptr);
     cargarConfig();
+    idioma::iniciar(idiomaConfig, carpetaJuego);
+    traducirTablas();
     crearPapel();
     prepararSonidos();
     texIcono = crearTextura(128, 128, (const uint32_t*)icono_pergamino);
@@ -1587,14 +1634,96 @@ void iniciar(ID3D11Device* d, ID3D11DeviceContext* c, HWND h, const char* carpet
             objetosVistos.insert(id);
         objetosAhora = {0x40000000u | 2137, 0x40000000u | 2102, 0x40000000u | 2127, 0x40000000u | 2132, 0x40000000u | 2108};
         fotoPendienteNpc = N_SIRRIS; fotoCuando = GetTickCount64() + 300;   // prueba del filtro sepia
+        novedadesDesde = GetTickCount64();
         sonar(true);
         vista = demoVista;
-        if (demoPaso >= 0) vista = demoAccion == 2 ? demoVista + 1 : demoVista - 1;   // se llegará a demo_vista con animación
+        if (demoPaso >= 0) vista = demoAccion == 0 ? 0 : demoAccion == 2 ? demoVista + 1 : demoVista - 1;   // se llegará a demo_vista con animación
         logf("MODO DEMOSTRACIÓN activo");
         return;
     }
     g.iniciar();
     engancharDialogos();
+}
+
+// ---------------------------------------------------------------- novedades
+// Una "clave" identifica cada cosa que el libro puede mostrar. Si aparece una que el jugador aún no ha visto
+// (zona, hoguera, jefe, persona, paso de misión, objeto...), el icono del cuaderno muestra un "!".
+// Al abrir el libro se dan todas por vistas. La primera lectura de cada partida no avisa de nada.
+std::set<long long> clavesDelLibro() {
+    std::set<long long> k;
+    auto K = [](int tipo, long long id) { return tipo * 10000000000LL + id; };
+    for (int z = 0; z < Z_TOTAL; ++z) {
+        if (zonaDescubierta(z)) k.insert(K(1, z));
+        for (uint32_t h : ZONAS[z].hogueras) { if (!h) break; if (F(h)) k.insert(K(2, h)); }
+    }
+    for (int j = 0; j < (int)(sizeof JEFES / sizeof JEFES[0]); ++j) if (F(JEFES[j].flag)) k.insert(K(3, j));
+    for (int n = 0; n < N_TOTAL; ++n) {
+        if (!conocido(n)) continue;
+        k.insert(K(4, n));
+        if (muertoNpc(n)) k.insert(K(5, n));
+        if (int fase = faseActual(n)) k.insert(K(6, n * 100000LL + fase));
+        k.insert(K(7, n * 100LL + pasoActual(NPCS[n])));
+    }
+    std::vector<Hito> hs = hitosPrincipales();
+    for (int i = 0; i < (int)hs.size(); ++i) if (hs[i].hecho) k.insert(K(8, i));
+    for (int i : objetosVisibles()) k.insert(K(9, i));
+    for (const Coleccionable& c : COLECCIONABLES) {
+        if (objetosAhora.count(0x40000000u | c.id)) k.insert(K(10, c.id * 10LL + 1));
+        else if (objetosVistos.count(0x40000000u | c.id)) k.insert(K(10, c.id * 10LL + 2));
+    }
+    return k;
+}
+
+std::string describirClave(long long k) {
+    int tipo = (int)(k / 10000000000LL); long long id = k % 10000000000LL;
+    char b[160];
+    switch (tipo) {
+    case 1: snprintf(b, sizeof b, "zona: %s", ZONAS[id].nombre); break;
+    case 2: snprintf(b, sizeof b, "hoguera %lld", id); break;
+    case 3: snprintf(b, sizeof b, "jefe: %s", JEFES[id].nombre); break;
+    case 4: snprintf(b, sizeof b, "persona: %s", NPCS[id].nombre); break;
+    case 5: snprintf(b, sizeof b, "ha muerto: %s", NPCS[id].nombre); break;
+    case 6: case 7: snprintf(b, sizeof b, "misión de %s avanza", NPCS[tipo == 6 ? id / 100000 : id / 100].nombre); break;
+    case 8: snprintf(b, sizeof b, "misión principal %lld", id); break;
+    case 9: snprintf(b, sizeof b, "objeto clave: %s", OBJETOS[id].nombre); break;
+    default: snprintf(b, sizeof b, "coleccionable %lld", id / 10); break;
+    }
+    return b;
+}
+
+void actualizarNovedades() {
+    static ULONGLONG ultimo = 0;
+    ULONGLONG t = GetTickCount64();
+    if (!demo && t - ultimo < 500) return;
+    ultimo = t;
+    if (!demo && carpetaPartida.empty()) return;
+    clavesAhora = clavesDelLibro();
+    if (!novedadesBase) {   // primera lectura: se espera a que el juego tenga flags e inventario y se da todo por visto
+        novedadesVistas.insert(clavesAhora.begin(), clavesAhora.end());
+        static int tics = 0; ++tics;   // en la demo (los cuadros van muy rápido) se cuentan cuadros, no tiempo
+        if ((demo ? tics >= 30 : t - novedadesDesde >= 6000) && (demo || inventarioLeido)) {
+            novedadesBase = true; estadoSucio = true;
+            logf("Novedades: lectura inicial de la partida (%d elementos), sin aviso", (int)novedadesVistas.size());
+        }
+        hayNovedad = false;
+        return;
+    }
+    if (vista != 0) {   // con el libro abierto, lo que aparece ya lo estás viendo
+        size_t antes = novedadesVistas.size();
+        novedadesVistas.insert(clavesAhora.begin(), clavesAhora.end());
+        if (hayNovedad || novedadesVistas.size() != antes) { estadoSucio = true; logf("Novedades: vistas al abrir el libro"); }
+        hayNovedad = false;
+        return;
+    }
+    bool habia = hayNovedad;
+    hayNovedad = false;
+    for (long long k : clavesAhora)
+        if (!novedadesVistas.count(k)) {
+            hayNovedad = true;
+            static std::set<long long> avisadas;
+            if (avisadas.insert(k).second) logf("Novedad: %s", describirClave(k).c_str());
+        }
+    if (hayNovedad && !habia) logf("Novedades: aviso encendido en el icono");
 }
 
 void cargarFuentes(float altoPantalla) {
@@ -1641,7 +1770,7 @@ void dibujar() {
         ImVec2 ds = ImGui::GetIO().DisplaySize;
         ImDrawList* fg = ImGui::GetForegroundDrawList();
         if (mostrarIcono) icono(fg, ImVec2(ds.x - 58 * s, 22 * s), s, true);
-        const char* av = u8"Cuaderno desactivado: inicia el juego sin conexión";
+        const char* av = T(u8"Cuaderno desactivado: inicia el juego sin conexión");
         ImVec2 z = fHud->CalcTextSizeA(fHud->FontSize, FLT_MAX, 0, av);
         fg->AddText(fHud, fHud->FontSize, ImVec2(ds.x - 66 * s - z.x + 1, 34 * s + 1), IM_COL32(0, 0, 0, 200), av);
         fg->AddText(fHud, fHud->FontSize, ImVec2(ds.x - 66 * s - z.x, 34 * s), IM_COL32(240, 200, 170, 255), av);
@@ -1651,6 +1780,7 @@ void dibujar() {
     diagnosticoTick(region, dialogo, linea);
 
     if (!demo) actualizarInventario();
+    if (demo) { static int cuadroNovedad = 0; if (demoNovedad >= 0 && ++cuadroNovedad == demoNovedad) { npcsConocidos.insert(N_ORBECK); g.demoFlags.insert((uint32_t)J_SABIO); } }
     int zonaAct = zonaDeRegionCompleta(region);
     if (zonaAct >= 0 && zonaAct < Z_TOTAL && !zonasVisitadas.count(zonaAct)) { zonasVisitadas.insert(zonaAct); estadoSucio = true; }
 
@@ -1670,6 +1800,7 @@ void dibujar() {
     // Horace no habla: lo das por conocido cuando está en las Catacumbas/Lago o en el Santuario con Anri
     if (!npcsConocidos.count(N_HORACE) && npcsConocidos.count(N_ANRI) && FB(NPCS[N_HORACE].enSantuario)) { npcsConocidos.insert(N_HORACE); estadoSucio = true; }
 
+    actualizarNovedades();
     static ULONGLONG ultimoGuardado = 0;
     if (GetTickCount64() - ultimoGuardado > 10000) { guardarEstado(); ultimoGuardado = GetTickCount64(); }
 
@@ -1710,14 +1841,14 @@ void dibujar() {
     ImDrawList* fg = ImGui::GetForegroundDrawList();
     if (bloqueado) {
         if (mostrarIcono) icono(fg, ImVec2(ds.x - 58 * s, 22 * s), s, true);
-        const char* av = u8"Cuaderno desactivado: inicia el juego sin conexión";
+        const char* av = T(u8"Cuaderno desactivado: inicia el juego sin conexión");
         ImVec2 z = fHud->CalcTextSizeA(fHud->FontSize, FLT_MAX, 0, av);
         fg->AddText(fHud, fHud->FontSize, ImVec2(ds.x - 66 * s - z.x + 1, 34 * s + 1), IM_COL32(0, 0, 0, 200), av);
         fg->AddText(fHud, fHud->FontSize, ImVec2(ds.x - 66 * s - z.x, 34 * s), IM_COL32(240, 200, 170, 255), av);
         return;
     }
     if (vista == 0 && anim != ANIM_CERRAR) {
-        if (mostrarIcono) icono(fg, ImVec2(ds.x - 58 * s, 22 * s), s, false);
+        if (mostrarIcono) icono(fg, ImVec2(ds.x - 58 * s, 22 * s), s, false, hayNovedad);
         return;
     }
     dibujarLibro(zonaAct);

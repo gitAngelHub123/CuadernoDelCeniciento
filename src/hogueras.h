@@ -2,7 +2,7 @@
 #pragma once
 #include <cstdint>
 struct NombreHoguera { uint32_t flag; const char* nombre; };
-static const NombreHoguera HOGUERAS[] = {
+static NombreHoguera HOGUERAS[] = {
     {14000000u, u8"Santuario de Enlace del Fuego"},
     {14000001u, u8"Cementerio de Ceniza"},
     {14000002u, u8"Iudex Gundyr"},

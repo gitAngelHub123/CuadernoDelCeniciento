@@ -167,7 +167,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID) {
         DisableThreadLibraryCalls(h);
         GetModuleFileNameA(h, g_dir, MAX_PATH);
         if (char* s = strrchr(g_dir, '\\')) *s = 0;
-        logf("==== Cuaderno del Ceniciento v1.0.0 cargado ====");
+        logf("==== Cuaderno del Ceniciento v1.1.0 cargado ====");
         CreateThread(nullptr, 0, mainThread, nullptr, 0, nullptr);
     }
     return TRUE;
