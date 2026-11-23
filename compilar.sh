@@ -8,6 +8,8 @@ mkdir -p build/obj build/gen
 # fuentes embebidas (IM FELL English, SIL OFL 1.1)
 [ build/gen/fuente_regular.h -nt recursos/IMFeENrm28P.ttf ] || (cd recursos && xxd -i -n fuente_regular IMFeENrm28P.ttf > ../build/gen/fuente_regular.h)
 [ build/gen/fuente_cursiva.h -nt recursos/IMFeENit28P.ttf ] || (cd recursos && xxd -i -n fuente_cursiva IMFeENit28P.ttf > ../build/gen/fuente_cursiva.h)
+# caracteres chinos (Noto Serif CJK SC recortada, SIL OFL 1.1; se rehace con herramientas/generar_fuente_cjk.py)
+[ build/gen/fuente_cjk.h -nt recursos/NotoSerifSC-cuaderno.ttf ] || (cd recursos && xxd -i -n fuente_cjk NotoSerifSC-cuaderno.ttf > ../build/gen/fuente_cjk.h)
 for f in buffer hook trampoline hde/hde64; do
   x86_64-w64-mingw32-gcc -O2 -c $M/src/$f.c -I$M/include -o build/obj/$(basename $f).o
 done

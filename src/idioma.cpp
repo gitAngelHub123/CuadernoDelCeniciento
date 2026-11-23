@@ -2,6 +2,8 @@
 #include "idioma.h"
 #include "ingles_gen.h"
 #include "ingles_texto.h"
+#include "chino_gen.h"
+#include "chino_texto.h"
 #include <unordered_map>
 #include <cstdio>
 #include <cstring>
@@ -11,7 +13,7 @@ void logf(const char* fmt, ...);   // main.cpp
 
 namespace idioma {
 namespace {
-bool en = false;
+std::string actual = "es";
 std::unordered_map<std::string, const char*> mapa;
 
 // Idioma con el que Steam lanza el juego: "language" de UserConfig en appmanifest_374320.acf
@@ -32,33 +34,39 @@ std::string idiomaDeSteam(const std::string& carpetaJuego) {
     fclose(f);
     return res;
 }
+
+template <size_t N> void cargar(const ParIdioma (&t)[N]) { for (auto& p : t) mapa[p.es] = p.tr; }
 }
 
-bool ingles() { return en; }
+bool espanol() { return actual == "es"; }
+bool chino() { return actual == "zh"; }
 
 void iniciar(const std::string& valor, const std::string& carpetaJuego) {
     std::string v = valor, origen = "config";
-    if (v != "es" && v != "en") {
+    if (v != "es" && v != "en" && v != "zh") {
         std::string st = idiomaDeSteam(carpetaJuego);
         origen = "Steam (" + st + ")";
         if (st == "spanish" || st == "latam") v = "es";
+        else if (st == "schinese") v = "zh";
         else if (!st.empty()) v = "en";
         else {
             origen = "sistema";
-            v = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_SPANISH ? "es" : "en";
+            LANGID l = GetUserDefaultUILanguage();
+            v = PRIMARYLANGID(l) == LANG_SPANISH ? "es"
+              : l == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED) || l == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SINGAPORE) ? "zh"
+              : "en";
         }
     }
-    en = v == "en";
+    actual = v;
     mapa.clear();
-    if (en) {
-        for (auto& p : INGLES_GEN) mapa[p.es] = p.en;
-        for (auto& p : INGLES_TEXTO) mapa[p.es] = p.en;     // las frases propias mandan sobre los nombres del juego
-    }
-    logf("Idioma del cuaderno: %s (%s)", en ? "inglés" : "español", origen.c_str());
+    // las frases propias mandan sobre los nombres del juego
+    if (v == "en") { cargar(INGLES_GEN); cargar(INGLES_TEXTO); }
+    if (v == "zh") { cargar(CHINO_GEN); cargar(CHINO_TEXTO); }
+    logf("Idioma del cuaderno: %s (%s)", v == "es" ? "español" : v == "zh" ? "chino simplificado" : "inglés", origen.c_str());
 }
 
 const char* T(const char* es) {
-    if (!en || !es) return es;
+    if (actual == "es" || !es) return es;
     auto it = mapa.find(es);
     return it == mapa.end() ? es : it->second;
 }
