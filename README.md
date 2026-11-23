@@ -1,6 +1,8 @@
 # Cuaderno del Ceniciento · The Ashen One's Journal
 
-**English:** a travel journal for DARK SOULS III (1.15.2) that guides you without removing exploration. Press a key and an old-paper book opens with everything you have discovered. **Now available in English and Spanish**: it follows the language Steam launches the game in (`idioma=auto` in `config.ini`; set `idioma=en` or `idioma=es` to force one). Play offline only. Install: copy `dinput8.dll` into `...\DARK SOULS III\Game\` (Linux/Proton: launch option `WINEDLLOVERRIDES="dinput8=n,b" %command%`). Keys: K open/close, L next page, J previous page, P redo portrait; gamepad: L3+R3 open/close, R3 next, L3 previous.
+**English:** a travel journal for DARK SOULS III (1.15.2) that guides you without removing exploration. Press a key and an old-paper book opens with everything you have discovered. **Available in English, Spanish and Simplified Chinese**: it follows the language Steam launches the game in (`idioma=auto` in `config.ini`; set `idioma=en`, `idioma=es` or `idioma=zh` to force one). Play offline only. Install: copy `dinput8.dll` into `...\DARK SOULS III\Game\` (Linux/Proton: launch option `WINEDLLOVERRIDES="dinput8=n,b" %command%`). Keys: K open/close, L next page, J previous page, P redo portrait; gamepad: L3+R3 open/close, R3 next, L3 previous.
+
+**简体中文：** 黑暗之魂3（1.15.2）的旅行手记，在不剥夺探索乐趣的前提下为你指引方向。现已支持简体中文：Steam 以简体中文启动游戏时自动使用中文，也可在 `config.ini` 中设置 `idioma=zh`。请仅在离线模式下使用。按键：K 打开/关闭，L 下一页，J 上一页，P 重拍肖像；手柄：L3+R3 打开/关闭，R3 下一页，L3 上一页。
 
 Mod para **DARK SOULS III** (versión 1.15.2): un cuaderno de viaje de papel antiguo que te orienta sin quitarte la exploración. Pulsa una tecla y se abre un libro con animación de tapa y de páginas, a pantalla completa, con todo lo que has descubierto en tu partida.
 
@@ -49,7 +51,7 @@ Con el cuaderno abierto, el juego no recibe L3 ni R3. **El juego no se pausa**: 
 
 ## Idioma
 
-El cuaderno está en **español** e **inglés**. Con `idioma=auto` (por defecto) usa el idioma con el que Steam lanza el juego: español de España o Latinoamérica → español; cualquier otro → inglés. Para forzarlo, pon `idioma=es` o `idioma=en` en `config.ini`. Los nombres de lugares, jefes, objetos y personajes son los oficiales del juego en cada idioma. Las partidas guardadas no dependen del idioma.
+El cuaderno está en **español**, **inglés** y **chino simplificado**. Con `idioma=auto` (por defecto) usa el idioma con el que Steam lanza el juego: español de España o Latinoamérica → español; chino simplificado → chino; cualquier otro → inglés. Para forzarlo, pon `idioma=es`, `idioma=en` o `idioma=zh` en `config.ini`. Los nombres de lugares, jefes, objetos y personajes son los oficiales del juego en cada idioma. Las partidas guardadas no dependen del idioma.
 
 ## Archivos que crea
 
@@ -72,6 +74,7 @@ Herramientas (`herramientas/`, Python): extraer textos y scripts de eventos de t
 - Direcciones de memoria y flags investigados con ayuda de [SoulSplitter](https://github.com/FrankvdStam/SoulSplitter), la tabla [The Grand Archives](https://github.com/The-Grand-Archives/Dark-Souls-III-CT-TGA), el [randomizer de thefifthmatt](https://github.com/thefifthmatt/SoulsRandomizers), [BinderTool](https://github.com/Atvaark/BinderTool) y [SoulsFormats](https://github.com/soulsmods/SoulsFormatsNEXT). No se ha copiado código de esos proyectos.
 - [Dear ImGui](https://github.com/ocornut/imgui) (MIT) y [MinHook](https://github.com/TsudaKageyu/minhook) (BSD-2-Clause).
 - Fuente IM FELL English de Igino Marini (SIL Open Font License 1.1).
+- Fuente Noto Serif CJK SC de Google y Adobe, recortada a los caracteres que usa el cuaderno (SIL Open Font License 1.1).
 - Nombres de lugares, NPCs y objetos: textos oficiales en español del juego. DARK SOULS es una marca de FromSoftware / Bandai Namco; este es un mod de fans sin relación con ellas.
 
 ## Licencia

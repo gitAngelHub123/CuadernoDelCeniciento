@@ -1,5 +1,5 @@
 // Cuaderno DS3 — lógica e interfaz: zona, ruta principal, zonas descubiertas, NPCs, fotos, controles.
-// © 2026 Angel. Usa Dear ImGui (MIT). Fuente: IM FELL English (SIL OFL 1.1, Igino Marini).
+// © 2026 Angel. Usa Dear ImGui (MIT). Fuentes: IM FELL English (SIL OFL 1.1, Igino Marini) y Noto Serif CJK SC recortada (SIL OFL 1.1).
 #include "cuaderno.h"
 #include "imgui.h"
 #include "MinHook.h"
@@ -14,6 +14,7 @@
 #include <map>
 #include "fuente_regular.h"
 #include "fuente_cursiva.h"
+#include "fuente_cjk.h"
 #include "icono_pergamino.h"
 #include "sonido.h"
 #include "hogueras.h"
@@ -38,7 +39,7 @@ WORD mandoAbrir = XINPUT_GAMEPAD_LEFT_THUMB | XINPUT_GAMEPAD_RIGHT_THUMB, mandoS
 float escala = 1.0f;
 float volumen = 0.7f;
 bool mostrarIcono = true, diagnostico = true, demo = false;
-std::string idiomaConfig = "auto";   // auto | es | en
+std::string idiomaConfig = "auto";   // auto | es | en | zh | zh
 int demoAccion = 1, demoVista = 1, demoPaso = -1, demoCuadro = 0, demoCaptura = 40;
 
 // vista: 0 cerrado, 1 zonas, 2.. páginas de NPCs
@@ -103,7 +104,7 @@ WORD botonesDeTexto(const char* v) {
 
 // Pasa al idioma elegido los nombres y textos de las tablas de datos.h y hogueras.h (una sola vez).
 void traducirTablas() {
-    if (!idioma::ingles()) return;
+    if (idioma::espanol()) return;
     for (auto& z : ZONAS) z.nombre = T(z.nombre);
     for (auto& j : JEFES) j.nombre = T(j.nombre);
     for (auto& n : NPCS) {
@@ -138,7 +139,7 @@ void cargarConfig() {
                   "escala=1.0\n"
                   "; volumen del sonido de página: 0 (sin sonido) a 1\n"
                   "volumen=0.7\n"
-                  "; idioma de los textos: auto (el del juego en Steam), es o en\n"
+                  "; idioma de los textos: auto (el del juego en Steam), es, en o zh (chino simplificado)\n"
                   "idioma=auto\n"
                   "mostrar_icono=1\n"
                   "diagnostico=1\n", f);
@@ -163,7 +164,7 @@ void cargarConfig() {
         else if (k == "mando_anterior") { if (WORD b = botonesDeTexto(v)) mandoAnterior = b; }
         else if (k == "escala") { float e = (float)atof(v); if (e >= 0.5f && e <= 3.f) escala = e; }
         else if (k == "volumen") { float e = (float)atof(v); if (e >= 0.f && e <= 1.f) volumen = e; }
-        else if (k == "idioma") { std::string x = v; for (auto& ch : x) ch = (char)tolower((unsigned char)ch); if (x == "es" || x == "en" || x == "auto") idiomaConfig = x; }
+        else if (k == "idioma") { std::string x = v; for (auto& ch : x) ch = (char)tolower((unsigned char)ch); if (x == "es" || x == "en" || x == "zh" || x == "auto") idiomaConfig = x; }
         else if (k == "mostrar_icono") mostrarIcono = atoi(v) != 0;
         else if (k == "diagnostico") diagnostico = atoi(v) != 0;
         else if (k == "demo") demo = atoi(v) != 0;
@@ -1740,11 +1741,22 @@ void cargarFuentes(float altoPantalla) {
     ImGuiIO& io = ImGui::GetIO();
     static const ImWchar rangos[] = {0x0020, 0x00FF, 0x2013, 0x2014, 0x2018, 0x201E, 0x2026, 0x2026, 0};
     ImFontConfig cfg; cfg.FontDataOwnedByAtlas = false; cfg.OversampleH = 2;
-    fTitulo  = io.Fonts->AddFontFromMemoryTTF((void*)fuente_regular, sizeof fuente_regular, 46 * E, &cfg, rangos);
-    fTexto   = io.Fonts->AddFontFromMemoryTTF((void*)fuente_regular, sizeof fuente_regular, 31 * E, &cfg, rangos);
-    fPeque   = io.Fonts->AddFontFromMemoryTTF((void*)fuente_regular, sizeof fuente_regular, 25 * E, &cfg, rangos);
-    fCursiva = io.Fonts->AddFontFromMemoryTTF((void*)fuente_cursiva, sizeof fuente_cursiva, 28 * E, &cfg, rangos);
-    fHud     = io.Fonts->AddFontFromMemoryTTF((void*)fuente_regular, sizeof fuente_regular, 18 * escala, &cfg, rangos);
+    // en chino, cada tamaño lleva además los glifos CJK (fusionados; la letra latina sigue siendo IM FELL)
+    static const ImWchar rangosCjk[] = {0x2E80, 0x9FFF, 0xFF00, 0xFFEF, 0};
+    auto agregar = [&](const unsigned char* datos, size_t n, float tam) {
+        ImFont* f = io.Fonts->AddFontFromMemoryTTF((void*)datos, (int)n, tam, &cfg, rangos);
+        if (idioma::chino()) {
+            ImFontConfig m; m.FontDataOwnedByAtlas = false; m.MergeMode = true; m.OversampleH = 1; m.PixelSnapH = true;
+            m.GlyphOffset.y = tam * 0.06f;   // Noto queda algo alta junto a IM FELL
+            io.Fonts->AddFontFromMemoryTTF((void*)fuente_cjk, sizeof fuente_cjk, tam * 0.86f, &m, rangosCjk);
+        }
+        return f;
+    };
+    fTitulo  = agregar(fuente_regular, sizeof fuente_regular, 46 * E);
+    fTexto   = agregar(fuente_regular, sizeof fuente_regular, 31 * E);
+    fPeque   = agregar(fuente_regular, sizeof fuente_regular, 25 * E);
+    fCursiva = agregar(fuente_cursiva, sizeof fuente_cursiva, 28 * E);
+    fHud     = agregar(fuente_regular, sizeof fuente_regular, 18 * escala);
     io.FontDefault = fTexto;
 }
 

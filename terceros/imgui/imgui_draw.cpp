@@ -4015,6 +4015,10 @@ const char* ImFont::CalcWordWrapPositionA(float scale, const char* text, const c
             // Words that cannot possibly fit within an entire line will be cut anywhere.
             if (word_width < wrap_width)
                 s = prev_word_end ? prev_word_end : word_end;
+            // [Cuaderno DS3] chino: la puntuación de cierre no puede empezar una línea; se lleva consigo el carácter anterior
+            else if (s > text && (c == 0x3001 || c == 0x3002 || c == 0xFF0C || c == 0xFF1A || c == 0xFF1B || c == 0xFF01 ||
+                                  c == 0xFF1F || c == 0xFF09 || c == 0x201D || c == 0x300D || c == 0x300F || c == 0x2026))
+                do { --s; } while (s > text && ((unsigned char)*s & 0xC0) == 0x80);
             break;
         }
 

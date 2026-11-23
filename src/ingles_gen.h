@@ -1,6 +1,9 @@
-// GENERADO por herramientas/generar_ingles.py: nombres oficiales es-ES -> en-US (textos del juego, solo los nombres que usa el mod).
+// GENERADO por herramientas/generar_ingles.py: nombres oficiales es-ES -> engus (textos del juego, solo los nombres que usa el mod).
 #pragma once
-struct ParIdioma { const char* es; const char* en; };
+#ifndef PAR_IDIOMA
+#define PAR_IDIOMA
+struct ParIdioma { const char* es; const char* tr; };
+#endif
 static const ParIdioma INGLES_GEN[] = {
     {u8"A los pies del muro", u8"Foot of the High Wall"},
     {u8"Aldrich, el Devoradioses", u8"Aldrich, Devourer of Gods"},

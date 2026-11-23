@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Lista los literales u8"..." de src/ que aún no tienen traducción (ni en ingles_gen.h ni en ingles_texto.h)."""
+"""Lista los literales u8"..." de src/ que aún no tienen traducción.
+Uso: comprobar_ingles.py [en|zh]   (en: ingles_gen.h + ingles_texto.h; zh: chino_gen.h + chino_texto.h)"""
 import re, glob, os, sys
 src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+pref = {"en": "ingles", "zh": "chino"}[sys.argv[1] if len(sys.argv) > 1 else "en"]
 lit = r'u8"((?:[^"\\]|\\.)*)"'
 tengo = set()
-for f in ("ingles_gen.h", "ingles_texto.h"):
+for f in (pref + "_gen.h", pref + "_texto.h"):
     p = os.path.join(src, f)
     if os.path.exists(p):
         for m in re.finditer(r'\{u8"((?:[^"\\]|\\.)*)",\s*u8"', open(p, encoding="utf-8").read()):
             tengo.add(m.group(1))
 falta = []
 for f in sorted(glob.glob(src + "/*.h") + glob.glob(src + "/*.cpp")):
-    if os.path.basename(f).startswith("ingles_"): continue
+    if re.match(r"(ingles|chino)_", os.path.basename(f)): continue
     for n, linea in enumerate(open(f, encoding="utf-8"), 1):
         for m in re.finditer(lit, linea):
             t = m.group(1)

@@ -5,7 +5,7 @@ prueba/*.exe
 __pycache__/
 
 # Entorno de Python
-herramientas/.venv/
+herramientas/.venv
 
 # Referencias de la comunidad (se descargan aparte; licencias propias)
 referencias/
